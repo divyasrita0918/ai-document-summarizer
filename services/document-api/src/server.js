@@ -2,11 +2,38 @@ import "dotenv/config";
 import express from "express";
 import pg from "pg";
 import Redis from "ioredis";
+import multer from "multer";
+import { documentQueue } from "./queue.js";
+import { randomUUID } from "node:crypto";
+import { uploadOriginalFile } from "./storage.js";
+import { prisma } from "./prisma.js";
 import { S3Client, ListBucketsCommand } from "@aws-sdk/client-s3";
 
 const { Pool } = pg;
 
 const app = express();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 5,
+  },
+  fileFilter: (req, file, callback) => {
+    const allowedTypes = [
+      "application/pdf",
+      "text/plain",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+
+    if (allowedTypes.includes(file.mimetype)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Only PDF, DOCX, and TXT files are allowed"));
+    }
+  },
+});
+
 const PORT = process.env.PORT || 3000;
 
 const postgres = new Pool({
@@ -64,6 +91,99 @@ app.get("/health", async (req, res) => {
   );
 
   res.status(healthy ? 200 : 503).json(checks);
+});
+
+app.get("/api/test-db", async (req, res) => {
+  try {
+    const documentCount = await prisma.document.count();
+
+    res.json({
+      success: true,
+      message: "Prisma connected to PostgreSQL",
+      documentCount,
+    });
+  } catch (error) {
+    console.error("Prisma database test failed:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Prisma database query failed",
+    });
+  }
+});
+
+
+
+app.post("/api/documents", upload.array("files", 5), async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({
+      message: "Please upload at least one file",
+    });
+  }
+
+  const email = req.body.email;
+
+  if (!email) {
+    return res.status(400).json({
+      message: "Email is required",
+    });
+  }
+
+  try {
+    const batchId = randomUUID();
+    const documents = [];
+
+    for (const file of req.files) {
+      const objectKey = `${randomUUID()}-${file.originalname}`;
+
+      await uploadOriginalFile(file, objectKey);
+
+      const document = await prisma.document.create({
+        data: {
+          batchId,
+          originalFilename: file.originalname,
+          originalObjectKey: objectKey,
+          email,
+          status: "UPLOADED",
+        },
+      });
+
+      await documentQueue.add(
+  "summarize-document",
+  {
+    documentId: document.id,
+  },
+  {
+    jobId: document.id,
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 2000,
+    },
+    removeOnComplete: true,
+    removeOnFail: false,
+  }
+);
+
+      documents.push({
+        id: document.id,
+        filename: document.originalFilename,
+        status: document.status,
+      });
+    }
+
+    res.status(201).json({
+      message: "Files uploaded and metadata saved successfully",
+      batchId,
+      documents,
+    });
+  } catch (error) {
+    console.error("Document upload failed:", error);
+
+    res.status(500).json({
+      message: "Failed to upload and register documents",
+    });
+  }
 });
 
 app.listen(PORT, () => {
