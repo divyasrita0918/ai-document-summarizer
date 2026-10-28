@@ -1,0 +1,26 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../services/document-api/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Document {
+  id                 String   @id @default(cuid())
+  batchId            String
+  originalFilename   String
+  originalObjectKey  String
+  summaryObjectKey   String?
+  email              String
+  status             String   @default("UPLOADED")
+  errorMessage       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([batchId])
+  @@index([status])
+  @@map("documents")
+}
