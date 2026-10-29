@@ -1,6 +1,14 @@
 {
+  "type": "module",
+  
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "bullmq": "^6.5.1",
+    "dotenv": "^18.0.9",
+    "ioredis": "^6.0.0",
     "mammoth": "^1.13.0",
+    "nodemailer": "^10.3.0",
+    "openai": "^7.45.1",
     "pdf-parse": "^2.4.5"
   }
 }

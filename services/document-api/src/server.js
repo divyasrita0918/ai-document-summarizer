@@ -5,7 +5,7 @@ import Redis from "ioredis";
 import multer from "multer";
 import { documentQueue } from "./queue.js";
 import { randomUUID } from "node:crypto";
-import { uploadOriginalFile } from "./storage.js";
+import { uploadOriginalFile, downloadSummary } from "./storage.js";
 import { prisma } from "./prisma.js";
 import { S3Client, ListBucketsCommand } from "@aws-sdk/client-s3";
 
@@ -182,6 +182,72 @@ app.post("/api/documents", upload.array("files", 5), async (req, res) => {
 
     res.status(500).json({
       message: "Failed to upload and register documents",
+    });
+  }
+});
+
+
+app.get("/api/documents/:id", async (req, res) => {
+  try {
+    const document = await prisma.document.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        error: "Document not found",
+      });
+    }
+
+    return res.json({
+      id: document.id,
+      originalFilename: document.originalFilename,
+      status: document.status,
+      errorMessage: document.errorMessage,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      summaryAvailable: Boolean(document.summaryObjectKey),
+    });
+  } catch (error) {
+    console.error("Document status error:", error.message);
+
+    return res.status(500).json({
+      error: "Failed to retrieve document status",
+    });
+  }
+});
+
+app.get("/api/documents/:id/summary", async (req, res) => {
+  try {
+    const document = await prisma.document.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!document) {
+      return res.status(404).json({
+        error: "Document not found",
+      });
+    }
+
+    if (document.status !== "COMPLETED" || !document.summaryObjectKey) {
+      return res.status(409).json({
+        error: "Summary is not available yet",
+        status: document.status,
+      });
+    }
+
+    const summary = await downloadSummary(
+      document.summaryObjectKey
+    );
+
+    return res
+      .type("text/plain")
+      .send(summary);
+  } catch (error) {
+    console.error("Summary retrieval error:", error.message);
+
+    return res.status(500).json({
+      error: "Failed to retrieve summary",
     });
   }
 });

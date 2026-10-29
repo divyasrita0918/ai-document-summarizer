@@ -35,3 +35,29 @@ export async function downloadOriginalFile(objectKey) {
 
   return Buffer.from(await response.Body.transformToByteArray());
 }
+
+
+export async function uploadSummary(summary, objectKey) {
+  await minio.send(
+    new PutObjectCommand({
+      Bucket: process.env.MINIO_SUMMARIES_BUCKET,
+      Key: objectKey,
+      Body: Buffer.from(summary, "utf8"),
+      ContentType: "text/plain; charset=utf-8",
+    })
+  );
+}
+
+
+export async function downloadSummary(objectKey) {
+  const response = await minio.send(
+    new GetObjectCommand({
+      Bucket: process.env.MINIO_SUMMARIES_BUCKET,
+      Key: objectKey,
+    })
+  );
+
+  return Buffer.from(
+    await response.Body.transformToByteArray()
+  ).toString("utf8");
+}
